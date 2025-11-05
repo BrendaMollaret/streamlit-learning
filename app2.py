@@ -6,9 +6,17 @@ from sklearn.metrics.pairwise import cosine_similarity
 from PIL import Image
 import requests
 from io import BytesIO
+import os
 from math import radians, sin, cos, asin, sqrt
+import base64
 
-st.title("🏡 Buscador de Propiedades Inteligente (Simulado con Embeddings)")
+st.title("Buscador de Propiedades Inteligente")
+
+# URL del backend (usar st.secrets si está definido; si no, env var o localhost)
+try:
+    API_BASE_URL = st.secrets["API_BASE_URL"]
+except Exception:
+    API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
 
 # Lista simple de stopwords en español (sklearn nativamente solo soporta 'english')
 SPANISH_STOPWORDS = [
@@ -75,6 +83,29 @@ def prepare_card_image(url: str) -> Image.Image | None:
         return img
     except Exception:
         return None
+
+def render_full_width_image(img: Image.Image | None, fallback_url: str | None = None) -> None:
+    """Render a full-width image without lightbox using HTML.
+
+    If a PIL image is provided, it is encoded to base64 and embedded inline.
+    If not, and a fallback URL is provided, that URL is used directly.
+    """
+    try:
+        if img is not None:
+            buffer = BytesIO()
+            img.save(buffer, format="JPEG", quality=90)
+            b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
+            src = f"data:image/jpeg;base64,{b64}"
+        elif isinstance(fallback_url, str) and fallback_url:
+            src = fallback_url
+        else:
+            return
+        st.markdown(
+            f"<img src='{src}' style='width:100%;height:auto;display:block;border-radius:8px;' />",
+            unsafe_allow_html=True,
+        )
+    except Exception:
+        pass
 
 # --- Dataset de ejemplo (incluye coordenadas) ---
 data = [
@@ -151,10 +182,7 @@ mood = st.selectbox(
 def render_card(row: pd.Series, extra_label: str | None = None) -> None:
     with st.container(border=True):
         img = prepare_card_image(row["imagen"]) if isinstance(row["imagen"], str) else None
-        if img is not None:
-            st.image(img, width='stretch')
-        else:
-            st.image(row["imagen"], width='stretch')
+        render_full_width_image(img, fallback_url=row.get("imagen") if isinstance(row.get("imagen"), str) else None)
         st.markdown(f"### {row['ciudad']} – {row['ubicacion']}")
         if extra_label:
             st.caption(extra_label)
@@ -163,16 +191,57 @@ def render_card(row: pd.Series, extra_label: str | None = None) -> None:
         st.write(f"📝 {row['descripcion']}")
 
 if mood == "Texto libre":
-    query = st.text_input("🔍 ¿Qué estás buscando? (ej: casa con jardín y pileta en Godoy Cruz)")
+    query = st.text_input("¿Qué estás buscando? (ej: casa con jardín y pileta en Godoy Cruz)")
+    # Forzar modelo fijo sin permitir elección del usuario
+    modelo = "sentence_transformer"
+    output_qty = st.number_input("Cantidad de resultados", min_value=1, max_value=20, value=5, step=1)
+
     if st.button("Buscar") and query:
-        query_emb = vectorizer.transform([query])
-        similitudes = cosine_similarity(query_emb, embeddings).flatten()
-        df_res = df.copy()
-        df_res["similitud"] = similitudes
-        resultados = df_res.sort_values("similitud", ascending=False).head(5)
-        st.subheader("Resultados más parecidos:")
-        for _, casa in resultados.iterrows():
-            render_card(casa, extra_label=f"Similitud: {casa['similitud']:.2f}")
+        payload = {
+            "texto": query,
+            "modelo": modelo,
+            "output_qty": int(output_qty),
+        }
+        with st.spinner("Consultando recomendaciones..."):
+            try:
+                resp = requests.post(f"{API_BASE_URL}/user_input", json=payload, timeout=30)
+                if resp.status_code != 200:
+                    try:
+                        err = resp.json().get("detail", resp.text)
+                    except Exception:
+                        err = resp.text
+                    st.error(f"Error del backend ({resp.status_code}): {err}")
+                else:
+                    data_out = resp.json()
+                    props = (data_out or {}).get("output", {}).get("properties", [])
+                    if not props:
+                        st.info("Sin resultados del backend.")
+                    else:
+                        st.subheader("Resultados del backend:")
+                        for prop in props:
+                            row = {
+                                "ciudad": prop.get("ciudad") or "",
+                                "ubicacion": prop.get("ubicacion") or prop.get("direccion") or "",
+                                "alquiler": prop.get("alquiler") if prop.get("alquiler") is not None else "",
+                                "m2_total": int(prop.get("m2_total")) if isinstance(prop.get("m2_total"), (int, float)) else prop.get("m2_total"),
+                                "ambientes": int(prop.get("ambientes")) if isinstance(prop.get("ambientes"), (int, float)) else prop.get("ambientes"),
+                                "banos": int(prop.get("banos")) if isinstance(prop.get("banos"), (int, float)) else prop.get("banos"),
+                                "imagen": prop.get("imagen"),
+                                "descripcion": prop.get("descripcion") or "",
+                            }
+                            extra = None
+                            if prop.get("score_total") is not None:
+                                extra = f"Puntaje: {prop['score_total']:.3f}"
+                            elif prop.get("similarity_score") is not None:
+                                extra = f"Similitud: {prop['similarity_score']:.3f}"
+                            render_card(pd.Series(row), extra_label=extra)
+                            if isinstance(prop.get("url"), str) and prop.get("url"):
+                                try:
+                                    st.link_button("Ver aviso", prop["url"], use_container_width=True)
+                                except Exception:
+                                    st.write(f"[Ver aviso]({prop['url']})")
+            except requests.exceptions.RequestException as e:
+                st.error(f"No se pudo contactar el backend en {API_BASE_URL}. Detalle: {e}")
 
 elif mood == "Parámetros":
     col1, col2, col3 = st.columns(3)
@@ -185,25 +254,95 @@ elif mood == "Parámetros":
     with col3:
         min_banos = st.number_input("Mín. baños", min_value=0, value=0, step=1)
         max_m2 = st.number_input("Máx. m²", min_value=0, value=0, step=10)
+        min_cocheras = st.number_input("Mín. cocheras", min_value=0, value=0, step=1)
+        min_alq = st.number_input("Alquiler mín.", min_value=0, value=0, step=1000)
+        max_alq = st.number_input("Alquiler máx.", min_value=0, value=0, step=1000)
+
+    modelo = "sentence_transformer"
+    output_qty = st.number_input("Cantidad de resultados", min_value=1, max_value=20, value=5, step=1)
 
     if st.button("Filtrar"):
-        df_res = df.copy()
-        if ciudad != "Todas":
-            df_res = df_res[df_res["ciudad"] == ciudad]
-        if min_m2 > 0:
-            df_res = df_res[df_res["m2_total"] >= min_m2]
-        if max_m2 > 0:
-            df_res = df_res[df_res["m2_total"] <= max_m2]
+        # Construir un texto de consulta a partir de los parámetros
+        partes = []
+        # No incluir ciudad en el texto generado
+        # Rango de m2
+        if min_m2 > 0 and max_m2 > 0:
+            if max_m2 >= min_m2:
+                partes.append(f"entre {int(min_m2)} y {int(max_m2)} m²")
+            else:
+                partes.append(f"al menos {int(min_m2)} m²")
+        elif min_m2 > 0:
+            partes.append(f"al menos {int(min_m2)} m²")
+        elif max_m2 > 0:
+            partes.append(f"hasta {int(max_m2)} m²")
+        # Ambientes y baños
         if min_amb > 0:
-            df_res = df_res[df_res["ambientes"] >= min_amb]
+            partes.append(f"con al menos {int(min_amb)} ambientes")
         if min_banos > 0:
-            df_res = df_res[df_res["banos"] >= min_banos]
-        st.subheader("Resultados filtrados:")
-        if df_res.empty:
-            st.info("No se encontraron propiedades con esos parámetros.")
-        else:
-            for _, casa in df_res.iterrows():
-                render_card(casa, None)
+            partes.append(f"con al menos {int(min_banos)} baños")
+        if min_cocheras > 0:
+            partes.append(f"con al menos {int(min_cocheras)} cocheras")
+        # Alquiler
+        if min_alq > 0 and max_alq > 0:
+            if max_alq >= min_alq:
+                partes.append(f"alquiler entre {int(min_alq)} y {int(max_alq)}")
+            else:
+                partes.append(f"alquiler desde {int(min_alq)}")
+        elif min_alq > 0:
+            partes.append(f"alquiler desde {int(min_alq)}")
+        elif max_alq > 0:
+            partes.append(f"alquiler hasta {int(max_alq)}")
+
+        consulta = " ".join(partes).strip()
+        if not consulta:
+            consulta = "propiedades"  # fallback minimal
+
+        payload = {
+            "texto": consulta,
+            "modelo": modelo,
+            "output_qty": int(output_qty),
+        }
+
+        with st.spinner("Consultando recomendaciones..."):
+            try:
+                resp = requests.post(f"{API_BASE_URL}/user_input", json=payload, timeout=30)
+                if resp.status_code != 200:
+                    try:
+                        err = resp.json().get("detail", resp.text)
+                    except Exception:
+                        err = resp.text
+                    st.error(f"Error del backend ({resp.status_code}): {err}")
+                else:
+                    data_out = resp.json()
+                    props = (data_out or {}).get("output", {}).get("properties", [])
+                    if not props:
+                        st.info("Sin resultados del backend.")
+                    else:
+                        st.subheader("Resultados del backend:")
+                        for prop in props:
+                            row = {
+                                "ciudad": prop.get("ciudad") or "",
+                                "ubicacion": prop.get("ubicacion") or prop.get("direccion") or "",
+                                "alquiler": prop.get("alquiler") if prop.get("alquiler") is not None else "",
+                                "m2_total": int(prop.get("m2_total")) if isinstance(prop.get("m2_total"), (int, float)) else prop.get("m2_total"),
+                                "ambientes": int(prop.get("ambientes")) if isinstance(prop.get("ambientes"), (int, float)) else prop.get("ambientes"),
+                                "banos": int(prop.get("banos")) if isinstance(prop.get("banos"), (int, float)) else prop.get("banos"),
+                                "imagen": prop.get("imagen"),
+                                "descripcion": prop.get("descripcion") or "",
+                            }
+                            extra = None
+                            if prop.get("score_total") is not None:
+                                extra = f"Puntaje: {prop['score_total']:.3f}"
+                            elif prop.get("similarity_score") is not None:
+                                extra = f"Similitud: {prop['similarity_score']:.3f}"
+                            render_card(pd.Series(row), extra_label=extra)
+                            if isinstance(prop.get("url"), str) and prop.get("url"):
+                                try:
+                                    st.link_button("Ver aviso", prop["url"], use_container_width=True)
+                                except Exception:
+                                    st.write(f"[Ver aviso]({prop['url']})")
+            except requests.exceptions.RequestException as e:
+                st.error(f"No se pudo contactar el backend en {API_BASE_URL}. Detalle: {e}")
 
 elif mood == "Mapa":
     try:
