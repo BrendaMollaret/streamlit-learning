@@ -309,7 +309,7 @@ def render_card(row: pd.Series, extra_label: str | None = None, show_number: boo
     with st.container(border=True):
         img = prepare_card_image(row["imagen"]) if isinstance(row["imagen"], str) else None
         render_full_width_image(img, fallback_url=row.get("imagen") if isinstance(row.get("imagen"), str) else None)
-        title_prefix = f"**#{number}** " if show_number and number is not None else ""
+        title_prefix = f"{number} - " if show_number and number is not None else ""
         st.markdown(f"<h2 style='font-size: 1.4rem; margin-bottom: 0.5rem;'>{title_prefix}{row['ciudad']} – {row['ubicacion']}</h2>", unsafe_allow_html=True)
         if extra_label:
             st.markdown(f"<p style='font-size: 0.95rem; color: #666; margin-top: 0;'>{extra_label}</p>", unsafe_allow_html=True)
