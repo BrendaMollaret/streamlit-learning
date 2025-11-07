@@ -42,27 +42,11 @@ def process_user_input(input_data: UserInput):
     sigma = input_data.sigma if input_data.sigma is not None else 4.0
     
     if model not in AVAILABLE_MODELS:
-        return {"status": "error", "message": f"Modelo no disponible. Modelos disponibles: {AVAILABLE_MODELS}"}
-    
-    # Convert GeoPoint objects to dictionaries for recommend_properties
-    ref_points = None
-    if coordinates:
-        ref_points = [{"lat": gp.lat, "lon": gp.lon} for gp in coordinates]
-        
-    recommend_properties = property_recommender.recommend_properties(
-        text, 
-        model, 
-        output_qty, 
-        ref_points=ref_points,
-        alpha=alpha,
-        sigma=sigma
-    )
+        return {"error": f"Modelo no disponible. Modelos disponibles: {AVAILABLE_MODELS}"}
+
+    recommend_properties = property_recommender.recommend_properties(text, model, output_qty, ref_points=coordinates, alpha=alpha, sigma=sigma)
     if recommend_properties is None:
-        return {"status": "error", "message": "Error al procesar la solicitud"}
-    
-    # Check if recommend_properties returned an error
-    if isinstance(recommend_properties, dict) and "error" in recommend_properties:
-        return {"status": "error", "message": recommend_properties.get("error", "Error desconocido")}
+        return {"error": "Error al procesar la solicitud"}
     
     return {
         "status": "success",
@@ -74,3 +58,4 @@ def process_user_input(input_data: UserInput):
         },
         "output": recommend_properties
     }
+

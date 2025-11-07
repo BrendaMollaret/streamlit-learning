@@ -27,14 +27,14 @@ import math
 from src.distance_calculator import haversine_km, DEFAULT_CITY, DEFAULT_COUNTRY
 from dataclasses import dataclass
 
+# Forzar el uso de TF-IDF siempre (desactivar SentenceTransformer)
 _USE_ST = False
-try:
-    from sentence_transformers import SentenceTransformer
-    _USE_ST = True
-except Exception:
-    _USE_ST = False
+# try:
+#     from sentence_transformers import SentenceTransformer
+#     _USE_ST = True
+# except Exception:
+#     _USE_ST = False
 
-_USE_EMBEDDING_MODEL = True
 
 @dataclass
 class GeoPoint:
@@ -124,13 +124,13 @@ def embed_texts(texts: List[str]):
     Returns:
         np.ndarray: Matrix of embeddings (n_samples, n_features)
     """
-    if _USE_ST:
-        try:
-            model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
-            vecs = model.encode(texts, show_progress_bar=False)
-            return np.array(vecs, dtype=np.float32)
-        except Exception:
-            pass
+    # if _USE_ST:
+    #     try:
+    #         model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+    #         vecs = model.encode(texts, show_progress_bar=False)
+    #         return np.array(vecs, dtype=np.float32)
+    #     except Exception:
+    #         pass
 
     # Fallback TF-IDF
     tfidf = TfidfVectorizer(max_features=5000, ngram_range=(1, 2), stop_words=stopword_es, preprocessor=normalize_text_es)
@@ -140,9 +140,9 @@ def embed_texts(texts: List[str]):
 
 # Function to embed a single query using the same vectorizer
 def embed_query(text: str, vectorizer: TfidfVectorizer):
-    if _USE_ST:
-        model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
-        return np.array(model.encode([text], show_progress_bar=False), dtype=np.float32)
+    # if _USE_ST:
+    #     model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+    #     return np.array(model.encode([text], show_progress_bar=False), dtype=np.float32)
     # Use vectorizer to transform query (sparse 1 x vocab)
     query_tfidf = vectorizer.transform([text])  # sparse 1 x vocab
     return query_tfidf
