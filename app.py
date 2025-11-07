@@ -253,14 +253,6 @@ df = pd.DataFrame(data)
 vectorizer = TfidfVectorizer(stop_words=SPANISH_STOPWORDS)
 embeddings = vectorizer.fit_transform(df["descripcion"])
 
-# --- Modo de búsqueda ---
-# Se mostrará dentro del card de controles en el modo Mapa, pero aquí para los otros modos
-mood = st.selectbox(
-    "Modo de búsqueda",
-    ["Texto libre", "Parámetros", "Mapa"],
-    index=2  # Cambiar a 2 para que "Mapa" sea el predeterminado
-)
-
 def render_card(row: pd.Series, extra_label: str | None = None, show_number: bool = True, number: int | None = None) -> None:
     with st.container(border=True):
         img = prepare_card_image(row["imagen"]) if isinstance(row["imagen"], str) else None
@@ -271,318 +263,202 @@ def render_card(row: pd.Series, extra_label: str | None = None, show_number: boo
             st.markdown(f"<p style='font-size: 0.95rem; color: #666; margin-top: 0;'>{extra_label}</p>", unsafe_allow_html=True)
         st.markdown(f"<p style='font-size: 1.1rem; margin: 0.5rem 0;'>💰 <strong>Alquiler:</strong> ${row['alquiler']}</p>", unsafe_allow_html=True)
         st.markdown(f"<p style='font-size: 1rem; margin: 0.5rem 0;'>📏 {row['m2_total']} m² | 🛏 {row['ambientes']} amb | 🚿 {row['banos']} baños</p>", unsafe_allow_html=True)
-        st.markdown(f"<p style='font-size: 0.95rem; margin: 0.5rem 0;'>📝 {row['descripcion']}</p>", unsafe_allow_html=True)
+        # Truncar descripción a 100 caracteres para que todas las cards tengan el mismo tamaño
+        descripcion = str(row['descripcion']) if row.get('descripcion') else ''
+        max_chars = 100
+        if len(descripcion) > max_chars:
+            descripcion = descripcion[:max_chars].rsplit(' ', 1)[0] + '...'
+        st.markdown(f"<p style='font-size: 0.95rem; margin: 0.5rem 0;'>📝 {descripcion}</p>", unsafe_allow_html=True)
 
-if mood == "Texto libre":
-    query = st.text_input("¿Qué estás buscando? (ej: casa con jardín y pileta en Godoy Cruz)")
-    # Forzar modelo fijo sin permitir elección del usuario
-    modelo = "sentence_transformer"
-    output_qty = st.number_input("Cantidad de resultados", min_value=1, max_value=20, value=5, step=1, key="output_qty_texto")
-
-    if st.button("Buscar") and query:
-        with st.spinner("Consultando recomendaciones..."):
-            try:
-                input_data = UserInput(
-                    texto=query,
-                    modelo=modelo,
-                    output_qty=int(output_qty)
-                )
-                data_out = process_user_input(input_data)
-                
-                if data_out.get("status") == "error":
-                    st.error(f"Error: {data_out.get('message', 'Error desconocido')}")
-                else:
-                    # Get properties from the output
-                    output = data_out.get("output", {})
-                    if isinstance(output, dict) and "error" in output:
-                        st.error(f"Error: {output.get('error', 'Error desconocido')}")
-                    else:
-                        props = output.get("properties", []) if isinstance(output, dict) else []
-                        if not props:
-                            st.info("Sin resultados.")
-                        else:
-                            st.subheader("Resultados:")
-                            # Mostrar propiedades en columnas de 3
-                            for i in range(0, len(props), 3):
-                                cols = st.columns(3)
-                                for j, col in enumerate(cols):
-                                    if i + j < len(props):
-                                        prop = props[i + j]
-                                        with col:
-                                            row = {
-                                                "ciudad": prop.get("ciudad") or "",
-                                                "ubicacion": prop.get("ubicacion") or prop.get("direccion") or "",
-                                                "alquiler": prop.get("alquiler") if prop.get("alquiler") is not None else "",
-                                                "m2_total": int(prop.get("m2_total")) if isinstance(prop.get("m2_total"), (int, float)) else prop.get("m2_total"),
-                                                "ambientes": int(prop.get("ambientes")) if isinstance(prop.get("ambientes"), (int, float)) else prop.get("ambientes"),
-                                                "banos": int(prop.get("banos")) if isinstance(prop.get("banos"), (int, float)) else prop.get("banos"),
-                                                "imagen": prop.get("imagen"),
-                                                "descripcion": prop.get("descripcion") or "",
-                                            }
-                                            extra = None
-                                            if prop.get("score_total") is not None:
-                                                extra = f"Puntaje: {prop['score_total']:.3f}"
-                                            elif prop.get("similarity_score") is not None:
-                                                extra = f"Similitud: {prop['similarity_score']:.3f}"
-                                            render_card(pd.Series(row), extra_label=extra)
-                                            if isinstance(prop.get("url"), str) and prop.get("url"):
-                                                try:
-                                                    st.link_button("Ver aviso", prop["url"], use_container_width=True)
-                                                except Exception:
-                                                    st.write(f"[Ver aviso]({prop['url']})")
-            except Exception as e:
-                st.error(f"Error al procesar la solicitud: {e}")
-                import traceback
-                st.code(traceback.format_exc())
-
-elif mood == "Parámetros":
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        ciudades = ["Todas"] + sorted(df["ciudad"].unique().tolist())
-        ciudad = st.selectbox("Ciudad", ciudades)
-    with col2:
-        min_m2 = st.number_input("Mín. m²", min_value=0, value=0, step=10)
-        min_amb = st.number_input("Mín. ambientes", min_value=0, value=0, step=1)
-    with col3:
-        min_banos = st.number_input("Mín. baños", min_value=0, value=0, step=1)
-        max_m2 = st.number_input("Máx. m²", min_value=0, value=0, step=10)
-        min_cocheras = st.number_input("Mín. cocheras", min_value=0, value=0, step=1)
-        min_alq = st.number_input("Alquiler mín.", min_value=0, value=0, step=1000)
-        max_alq = st.number_input("Alquiler máx.", min_value=0, value=0, step=1000)
-
-    modelo = "sentence_transformer"
-    output_qty = st.number_input("Cantidad de resultados", min_value=1, max_value=20, value=5, step=1, key="output_qty_parametros")
-
-    if st.button("Filtrar"):
-        # Construir un texto de consulta a partir de los parámetros
-        partes = []
-        # No incluir ciudad en el texto generado
-        # Rango de m2
-        if min_m2 > 0 and max_m2 > 0:
-            if max_m2 >= min_m2:
-                partes.append(f"entre {int(min_m2)} y {int(max_m2)} m²")
-            else:
-                partes.append(f"al menos {int(min_m2)} m²")
-        elif min_m2 > 0:
-            partes.append(f"al menos {int(min_m2)} m²")
-        elif max_m2 > 0:
-            partes.append(f"hasta {int(max_m2)} m²")
-        # Ambientes y baños
-        if min_amb > 0:
-            partes.append(f"con al menos {int(min_amb)} ambientes")
-        if min_banos > 0:
-            partes.append(f"con al menos {int(min_banos)} baños")
-        if min_cocheras > 0:
-            partes.append(f"con al menos {int(min_cocheras)} cocheras")
-        # Alquiler
-        if min_alq > 0 and max_alq > 0:
-            if max_alq >= min_alq:
-                partes.append(f"alquiler entre {int(min_alq)} y {int(max_alq)}")
-            else:
-                partes.append(f"alquiler desde {int(min_alq)}")
-        elif min_alq > 0:
-            partes.append(f"alquiler desde {int(min_alq)}")
-        elif max_alq > 0:
-            partes.append(f"alquiler hasta {int(max_alq)}")
-
-        consulta = " ".join(partes).strip()
-        if not consulta:
-            consulta = "propiedades"  # fallback minimal
-
-        with st.spinner("Consultando recomendaciones..."):
-            try:
-                input_data = UserInput(
-                    texto=consulta,
-                    modelo=modelo,
-                    output_qty=int(output_qty)
-                )
-                data_out = process_user_input(input_data)
-                
-                if data_out.get("status") == "error":
-                    st.error(f"Error: {data_out.get('message', 'Error desconocido')}")
-                else:
-                    # Get properties from the output
-                    output = data_out.get("output", {})
-                    if isinstance(output, dict) and "error" in output:
-                        st.error(f"Error: {output.get('error', 'Error desconocido')}")
-                    else:
-                        props = output.get("properties", []) if isinstance(output, dict) else []
-                        if not props:
-                            st.info("Sin resultados.")
-                        else:
-                            st.subheader("Resultados:")
-                            # Mostrar propiedades en columnas de 3
-                            for i in range(0, len(props), 3):
-                                cols = st.columns(3)
-                                for j, col in enumerate(cols):
-                                    if i + j < len(props):
-                                        prop = props[i + j]
-                                        with col:
-                                            row = {
-                                                "ciudad": prop.get("ciudad") or "",
-                                                "ubicacion": prop.get("ubicacion") or prop.get("direccion") or "",
-                                                "alquiler": prop.get("alquiler") if prop.get("alquiler") is not None else "",
-                                                "m2_total": int(prop.get("m2_total")) if isinstance(prop.get("m2_total"), (int, float)) else prop.get("m2_total"),
-                                                "ambientes": int(prop.get("ambientes")) if isinstance(prop.get("ambientes"), (int, float)) else prop.get("ambientes"),
-                                                "banos": int(prop.get("banos")) if isinstance(prop.get("banos"), (int, float)) else prop.get("banos"),
-                                                "imagen": prop.get("imagen"),
-                                                "descripcion": prop.get("descripcion") or "",
-                                            }
-                                            extra = None
-                                            if prop.get("score_total") is not None:
-                                                extra = f"Puntaje: {prop['score_total']:.3f}"
-                                            elif prop.get("similarity_score") is not None:
-                                                extra = f"Similitud: {prop['similarity_score']:.3f}"
-                                            render_card(pd.Series(row), extra_label=extra)
-                                            if isinstance(prop.get("url"), str) and prop.get("url"):
-                                                try:
-                                                    st.link_button("Ver aviso", prop["url"], use_container_width=True)
-                                                except Exception:
-                                                    st.write(f"[Ver aviso]({prop['url']})")
-            except Exception as e:
-                st.error(f"Error al procesar la solicitud: {e}")
-                import traceback
-                st.code(traceback.format_exc())
-
-elif mood == "Mapa":
-    try:
-        import folium
-        from streamlit_folium import st_folium
-        from geopy.geocoders import Nominatim
-        from geopy.exc import GeocoderTimedOut, GeocoderServiceError
-        
-        # Inicializar session_state para puntos seleccionados y propiedades encontradas
-        if "selected_points" not in st.session_state:
-            st.session_state["selected_points"] = []
-        if "found_properties" not in st.session_state:
-            st.session_state["found_properties"] = []
-        
-        # Función para geocodificar un lugar
-        def geocode_location(query: str):
-            """Busca coordenadas de un lugar usando Nominatim"""
-            try:
-                geolocator = Nominatim(user_agent="streamlit_property_app", timeout=10)
-                location = geolocator.geocode(query, exactly_one=True)
-                if location:
-                    return {
-                        "lat": location.latitude,
-                        "lon": location.longitude,
-                        "address": location.address
-                    }
-            except (GeocoderTimedOut, GeocoderServiceError) as e:
-                st.error(f"Error al buscar el lugar: {e}")
-            except Exception as e:
-                st.error(f"Error inesperado: {e}")
-            return None
-        
-        # Estructura de dos columnas: izquierda (controles) y derecha (mapa)
-        # Usar proporciones similares al React: izquierda ~400px, derecha el resto
-        col_left, col_right = st.columns([1, 2.5], gap="large")
-        
-        with col_left:
-            # Card con controles de búsqueda
-            with st.container(border=True):
-                # Modo de búsqueda (mostrado aquí para consistencia con React)
-                # Nota: El modo se controla desde arriba, pero lo mostramos aquí para la UI
-                st.markdown("**Modo de búsqueda:** Mapa")
-                
-                # Búsqueda por texto (opcional)
+# Modo Mapa siempre activo
+try:
+    import folium
+    from streamlit_folium import st_folium
+    from geopy.geocoders import Nominatim
+    from geopy.exc import GeocoderTimedOut, GeocoderServiceError
+    
+    # Inicializar session_state para puntos seleccionados y propiedades encontradas
+    if "selected_points" not in st.session_state:
+        st.session_state["selected_points"] = []
+    if "found_properties" not in st.session_state:
+        st.session_state["found_properties"] = []
+    if "modo_texto" not in st.session_state:
+        st.session_state["modo_texto"] = "Texto libre"
+    
+    # Función para geocodificar un lugar
+    def geocode_location(query: str):
+        """Busca coordenadas de un lugar usando Nominatim"""
+        try:
+            geolocator = Nominatim(user_agent="streamlit_property_app", timeout=10)
+            location = geolocator.geocode(query, exactly_one=True)
+            if location:
+                return {
+                    "lat": location.latitude,
+                    "lon": location.longitude,
+                    "address": location.address
+                }
+        except (GeocoderTimedOut, GeocoderServiceError) as e:
+            st.error(f"Error al buscar el lugar: {e}")
+        except Exception as e:
+            st.error(f"Error inesperado: {e}")
+        return None
+    
+    # Estructura de dos columnas: izquierda (controles) y derecha (mapa)
+    # Usar proporciones similares al React: izquierda ~400px, derecha el resto
+    col_left, col_right = st.columns([1, 2.5], gap="large")
+    
+    with col_left:
+        # Card con controles de búsqueda
+        with st.container(border=True):
+            # Modo de texto de búsqueda
+            modo_texto = st.selectbox(
+                "Modo de texto de búsqueda",
+                ["Texto libre", "Parámetros"],
+                index=0 if st.session_state["modo_texto"] == "Texto libre" else 1,
+                key="modo_texto_selector"
+            )
+            st.session_state["modo_texto"] = modo_texto
+            
+            # Mostrar controles según el modo seleccionado
+            texto_busqueda = ""
+            
+            if modo_texto == "Texto libre":
+                # Búsqueda por texto libre
                 texto_busqueda = st.text_input(
                     "Texto de búsqueda (opcional)",
                     value="",
-                    placeholder="Ej: casa con jardín",
+                    placeholder="Ej: casa con jardín y pileta",
                     help="Busque propiedades por características",
                     key="texto_busqueda_mapa"
                 )
+            else:  # Parámetros
+                # Controles de parámetros
+                col1, col2 = st.columns(2)
+                with col1:
+                    min_m2 = st.number_input("Mín. m²", min_value=10, value=10, step=10, key="min_m2_mapa")
+                    min_amb = st.number_input("Mín. ambientes", min_value=1, value=1, step=1, key="min_amb_mapa")
+                    min_banos = st.number_input("Mín. baños", min_value=1, value=1, step=1, key="min_banos_mapa")
+                with col2:
+                    max_m2 = st.number_input("Máx. m²", min_value=10, value=10, step=10, key="max_m2_mapa")
+                    min_cocheras = st.number_input("Mín. cocheras", min_value=1, value=1, step=1, key="min_cocheras_mapa")
+                    min_alq = st.number_input("Alquiler mín.", min_value=0, value=0, step=1000, key="min_alq_mapa")
+                    max_alq = st.number_input("Alquiler máx.", min_value=0, value=0, step=1000, key="max_alq_mapa")
                 
-               
-                
-              
-                
-                # Separador
-                st.divider()
-                
-                # Sliders para alpha y sigma
-                alpha = st.slider(
-                    "Alpha (importancia de características de la casa)",
-                    min_value=0.1,
-                    max_value=0.9,
-                    value=0.8,
-                    step=0.05,
-                    help="Más alto = más importancia a las características de la casa",
-                    key="alpha_mapa"
-                )
-                sigma = st.slider(
-                    "Sigma (distancia de penalización en km)",
-                    min_value=1.0,
-                    max_value=20.0,
-                    value=4.0,
-                    step=0.5,
-                    help="Después de cuántos km promedio se penaliza la distancia",
-                    key="sigma_mapa"
-                )
-                
-                # Separador
-                st.divider()
-                
-                # Cantidad de resultados
-                output_qty = st.number_input(
-                    "Cantidad de resultados",
-                    min_value=1,
-                    max_value=20,
-                    value=10,
-                    step=1,
-                    key="output_qty_mapa"
-                )
-                
-                # Botón de búsqueda
-                modelo = "custom_embedding"
-                if st.button("Buscar propiedades", use_container_width=True, key="buscar_propiedades_mapa"):
-                    # Puede buscar solo por texto, solo por puntos, o ambos
-                    if not texto_busqueda.strip() and not st.session_state["selected_points"]:
-                        st.warning("⚠️ Debe proporcionar texto de búsqueda o seleccionar puntos en el mapa (o ambos).")
+                # Construir texto de consulta a partir de los parámetros
+                partes = []
+                if min_m2 > 0 and max_m2 > 0:
+                    if max_m2 >= min_m2:
+                        partes.append(f"entre {int(min_m2)} y {int(max_m2)} m²")
                     else:
-                        # Preparar coordenadas como objetos GeoPoint (si hay puntos)
-                        coordenadas = None
-                        if st.session_state["selected_points"]:
-                            coordenadas = [
-                                GeoPoint(lat=p["lat"], lon=p["lon"])
-                                for p in st.session_state["selected_points"]
-                            ]
-                        
-                        with st.spinner("Consultando recomendaciones..."):
-                            try:
-                                input_data = UserInput(
-                                    texto=texto_busqueda if texto_busqueda.strip() else "",
-                                    modelo=modelo,
-                                    output_qty=int(output_qty),
-                                    coordenadas=coordenadas,
-                                    alpha=float(alpha),
-                                    sigma=float(sigma)
-                                )
-                                data_out = process_user_input(input_data)
-                                
-                                if data_out.get("status") == "error":
-                                    st.error(f"Error: {data_out.get('message', 'Error desconocido')}")
+                        partes.append(f"al menos {int(min_m2)} m²")
+                elif min_m2 > 0:
+                    partes.append(f"al menos {int(min_m2)} m²")
+                elif max_m2 > 0:
+                    partes.append(f"hasta {int(max_m2)} m²")
+                if min_amb > 0:
+                    partes.append(f"con al menos {int(min_amb)} ambientes")
+                if min_banos > 0:
+                    partes.append(f"con al menos {int(min_banos)} baños")
+                if min_cocheras > 0:
+                    partes.append(f"con al menos {int(min_cocheras)} cocheras")
+                if min_alq > 0 and max_alq > 0:
+                    if max_alq >= min_alq:
+                        partes.append(f"alquiler entre {int(min_alq)} y {int(max_alq)}")
+                    else:
+                        partes.append(f"alquiler desde {int(min_alq)}")
+                elif min_alq > 0:
+                    partes.append(f"alquiler desde {int(min_alq)}")
+                elif max_alq > 0:
+                    partes.append(f"alquiler hasta {int(max_alq)}")
+                
+                texto_busqueda = " ".join(partes).strip()
+                if not texto_busqueda:
+                    texto_busqueda = ""  # Dejar vacío si no hay parámetros
+            
+            # Separador
+            st.divider()
+            
+            # Sliders para alpha y sigma
+            alpha = st.slider(
+                "Alpha (importancia de características de la casa)",
+                min_value=0.1,
+                max_value=0.9,
+                value=0.8,
+                step=0.05,
+                help="Más alto = más importancia a las características de la casa",
+                key="alpha_mapa"
+            )
+            sigma = st.slider(
+                "Sigma (distancia de penalización en km)",
+                min_value=1.0,
+                max_value=20.0,
+                value=4.0,
+                step=0.5,
+                help="Después de cuántos km promedio se penaliza la distancia",
+                key="sigma_mapa"
+            )
+            
+            # Separador
+            st.divider()
+            
+            # Cantidad de resultados
+            output_qty = st.number_input(
+                "Cantidad de resultados",
+                min_value=1,
+                max_value=20,
+                value=10,
+                step=1,
+                key="output_qty_mapa"
+            )
+            
+            # Botón de búsqueda
+            modelo = "custom_embedding"
+            if st.button("Buscar propiedades", use_container_width=True, key="buscar_propiedades_mapa"):
+                # Puede buscar solo por texto, solo por puntos, o ambos
+                if not texto_busqueda.strip() and not st.session_state["selected_points"]:
+                    st.warning("⚠️ Debe proporcionar texto de búsqueda o seleccionar puntos en el mapa (o ambos).")
+                else:
+                    # Preparar coordenadas como objetos GeoPoint (si hay puntos)
+                    coordenadas = None
+                    if st.session_state["selected_points"]:
+                        coordenadas = [
+                            GeoPoint(lat=p["lat"], lon=p["lon"])
+                            for p in st.session_state["selected_points"]
+                        ]
+                    
+                    with st.spinner("Consultando recomendaciones..."):
+                        try:
+                            input_data = UserInput(
+                                texto=texto_busqueda if texto_busqueda.strip() else "",
+                                modelo=modelo,
+                                output_qty=int(output_qty),
+                                coordenadas=coordenadas,
+                                alpha=float(alpha),
+                                sigma=float(sigma)
+                            )
+                            data_out = process_user_input(input_data)
+                            
+                            if data_out.get("status") == "error":
+                                st.error(f"Error: {data_out.get('message', 'Error desconocido')}")
+                            else:
+                                # Get properties from the output
+                                output = data_out.get("output", {})
+                                if isinstance(output, dict) and "error" in output:
+                                    st.error(f"Error: {output.get('error', 'Error desconocido')}")
                                 else:
-                                    # Get properties from the output
-                                    output = data_out.get("output", {})
-                                    if isinstance(output, dict) and "error" in output:
-                                        st.error(f"Error: {output.get('error', 'Error desconocido')}")
+                                    props = output.get("properties", []) if isinstance(output, dict) else []
+                                    if not props:
+                                        st.info("Sin resultados.")
+                                        st.session_state["found_properties"] = []
                                     else:
-                                        props = output.get("properties", []) if isinstance(output, dict) else []
-                                        if not props:
-                                            st.info("Sin resultados.")
-                                            st.session_state["found_properties"] = []
-                                        else:
-                                            # Guardar propiedades en session_state para mostrarlas en el mapa
-                                            st.session_state["found_properties"] = props
-                                            st.success(f"✅ Se encontraron {len(props)} propiedades. Ver el mapa y el listado abajo.")
-                                            st.rerun()
-                            except Exception as e:
-                                st.error(f"Error al procesar la solicitud: {e}")
-                                import traceback
-                                st.code(traceback.format_exc())
+                                        # Guardar propiedades en session_state para mostrarlas en el mapa
+                                        st.session_state["found_properties"] = props
+                                        st.success(f"✅ Se encontraron {len(props)} propiedades. Ver el mapa y el listado abajo.")
+                                        st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al procesar la solicitud: {e}")
+                            import traceback
+                            st.code(traceback.format_exc())
             
             # Puntos seleccionados (debajo del card)
             if st.session_state["selected_points"]:
@@ -590,8 +466,14 @@ elif mood == "Mapa":
                 points_to_remove = []
                 for idx, point in enumerate(st.session_state["selected_points"]):
                     address = point.get('address', 'Sin dirección')
-                    st.markdown(f"<p style='font-size: 1rem; margin: 0.3rem 0;'><strong>Punto {idx + 1}</strong></p>", unsafe_allow_html=True)
-                    st.markdown(f"<p style='font-size: 0.95rem; margin: 0.2rem 0;'>{address}</p>", unsafe_allow_html=True)
+                    # Truncar dirección: tomar solo las primeras partes hasta "Boulogne Sur Mer," o las primeras 3 partes
+                    address_parts = address.split(', ')
+                    if len(address_parts) > 3:
+                        # Tomar las primeras 3 partes (hasta "Boulogne Sur Mer,")
+                        short_address = ', '.join(address_parts[:3]) + ','
+                    else:
+                        short_address = address
+                    st.markdown(f"<p style='font-size: 0.95rem; margin: 0.2rem 0;'>{short_address}</p>", unsafe_allow_html=True)
                     st.markdown(f"<p style='font-size: 0.85rem; color: #666; margin-top: 0; margin-bottom: 0.8rem;'>Lat: {point['lat']:.6f}, Lon: {point['lon']:.6f}</p>", unsafe_allow_html=True)
                     if st.button("Eliminar", key=f"remove_{idx}", use_container_width=True):
                         points_to_remove.append(idx)
@@ -829,9 +711,13 @@ elif mood == "Mapa":
                         "lon": clicked_lon,
                         "address": address
                     }
-                    st.session_state["selected_points"].append(new_point)
-                    st.success(f"✅ Punto agregado desde el mapa: {address}")
-                    st.rerun()
+                        # Limitar a 3 puntos
+                    if len(st.session_state["selected_points"]) >= 3:
+                        st.toast("⚠️ Solo puedes marcar hasta 3 puntos de referencia.", icon="⚠️")
+                    else:
+                        st.session_state["selected_points"].append(new_point)
+                        st.rerun()
+                  
         
         # Manejar clicks en el mapa
         # Usar un key único para evitar procesar el mismo click múltiples veces
@@ -884,54 +770,57 @@ elif mood == "Mapa":
                     )
                     
                     if not exists:
-                        st.session_state["selected_points"].append(new_point)
-                        st.success(f"✅ Punto agregado: {address}")
-                        st.rerun()
-        
-        # Mostrar propiedades encontradas debajo del mapa (en columnas de 3)
-        if st.session_state["found_properties"]:
-            st.subheader("Propiedades encontradas:")
-            props = st.session_state["found_properties"]
-            # Mostrar propiedades en columnas de 3
-            for i in range(0, len(props), 3):
-                cols = st.columns(3)
-                for j, col in enumerate(cols):
-                    if i + j < len(props):
-                        prop = props[i + j]
-                        with col:
-                            row = {
-                                "ciudad": prop.get("ciudad") or "",
-                                "ubicacion": prop.get("ubicacion") or prop.get("direccion") or "",
-                                "alquiler": prop.get("alquiler") if prop.get("alquiler") is not None else "",
-                                "m2_total": int(prop.get("m2_total")) if isinstance(prop.get("m2_total"), (int, float)) else prop.get("m2_total"),
-                                "ambientes": int(prop.get("ambientes")) if isinstance(prop.get("ambientes"), (int, float)) else prop.get("ambientes"),
-                                "banos": int(prop.get("banos")) if isinstance(prop.get("banos"), (int, float)) else prop.get("banos"),
-                                "imagen": prop.get("imagen"),
-                                "descripcion": prop.get("descripcion") or "",
-                            }
-                            extra = None
-                            if prop.get("score_total") is not None:
-                                extra = f"Puntaje: {prop['score_total']:.3f}"
-                            elif prop.get("similarity_score") is not None:
-                                extra = f"Similitud: {prop['similarity_score']:.3f}"
-                            if prop.get("distance_km") is not None:
-                                dist_text = f"Distancia: {prop['distance_km']:.2f} km"
-                                extra = f"{extra} | {dist_text}" if extra else dist_text
-                            # Mostrar sin numeración (show_number=False)
-                            render_card(pd.Series(row), extra_label=extra, show_number=False)
-                            if isinstance(prop.get("url"), str) and prop.get("url"):
-                                try:
-                                    st.link_button("Ver aviso", prop["url"], use_container_width=True)
-                                except Exception:
-                                    st.write(f"[Ver aviso]({prop['url']})")
-        
-        # Mensaje de ayuda
-        if not st.session_state["selected_points"] and not st.session_state["found_properties"]:
-            st.info("💡 **Tip:** Selecciona puntos en el mapa haciendo click o busca lugares usando el campo de texto")
-    except ImportError as e:
-        st.error(f"Faltan dependencias necesarias: {e}")
-        st.info("Instale las dependencias: 'folium', 'streamlit-folium' y 'geopy'.")
-    except Exception as e:
-        st.error(f"Error: {e}")
-        import traceback
-        st.code(traceback.format_exc())
+                        # Limitar a 3 puntos
+                        if len(st.session_state["selected_points"]) >= 3:
+                            st.toast("Solo puedes marcar hasta 3 puntos de referencia.", icon="⚠️")
+                        else:
+                            st.session_state["selected_points"].append(new_point)
+                            st.rerun()
+    
+    # Mostrar propiedades encontradas debajo del mapa (en columnas de 3)
+    if st.session_state["found_properties"]:
+        st.subheader("Propiedades encontradas:")
+        props = st.session_state["found_properties"]
+        # Mostrar propiedades en columnas de 3
+        for i in range(0, len(props), 3):
+            cols = st.columns(3)
+            for j, col in enumerate(cols):
+                if i + j < len(props):
+                    prop = props[i + j]
+                    with col:
+                        row = {
+                            "ciudad": prop.get("ciudad") or "",
+                            "ubicacion": prop.get("ubicacion") or prop.get("direccion") or "",
+                            "alquiler": prop.get("alquiler") if prop.get("alquiler") is not None else "",
+                            "m2_total": int(prop.get("m2_total")) if isinstance(prop.get("m2_total"), (int, float)) else prop.get("m2_total"),
+                            "ambientes": int(prop.get("ambientes")) if isinstance(prop.get("ambientes"), (int, float)) else prop.get("ambientes"),
+                            "banos": int(prop.get("banos")) if isinstance(prop.get("banos"), (int, float)) else prop.get("banos"),
+                            "imagen": prop.get("imagen"),
+                            "descripcion": prop.get("descripcion") or "",
+                        }
+                        extra = None
+                        if prop.get("score_total") is not None:
+                            extra = f"Puntaje: {prop['score_total']:.3f}"
+                        elif prop.get("similarity_score") is not None:
+                            extra = f"Similitud: {prop['similarity_score']:.3f}"
+                        if prop.get("distance_km") is not None:
+                            dist_text = f"Distancia: {prop['distance_km']:.2f} km"
+                            extra = f"{extra} | {dist_text}" if extra else dist_text
+                        # Mostrar sin numeración (show_number=False)
+                        render_card(pd.Series(row), extra_label=extra, show_number=False)
+                        if isinstance(prop.get("url"), str) and prop.get("url"):
+                            try:
+                                st.link_button("Ver aviso", prop["url"], use_container_width=True)
+                            except Exception:
+                                st.write(f"[Ver aviso]({prop['url']})")
+    
+    # Mensaje de ayuda
+    if not st.session_state["selected_points"] and not st.session_state["found_properties"]:
+        st.info("💡 **Tip:** Selecciona puntos en el mapa haciendo click o busca lugares usando el campo de texto")
+except ImportError as e:
+    st.error(f"Faltan dependencias necesarias: {e}")
+    st.info("Instale las dependencias: 'folium', 'streamlit-folium' y 'geopy'.")
+except Exception as e:
+    st.error(f"Error: {e}")
+    import traceback
+    st.code(traceback.format_exc())
