@@ -7,7 +7,7 @@ from PIL import Image
 import requests
 from io import BytesIO
 import os
-from math import radians, sin, cos, asin, sqrt
+from math import radians, sin, cos, asin, sqrt, pi
 import base64
 from src.process_user_input import process_user_input, UserInput, GeoPoint
 
@@ -67,6 +67,55 @@ st.markdown("""
         font-size: 1rem !important;
     }
     
+    /* Reducir espacios verticales entre inputs, sliders y botones */
+    .block-container div[data-testid="stVerticalBlock"] > div {
+    margin-bottom: 0.4rem !important;
+    }
+
+    /* Reducir padding interno de contenedores con borde */
+    div[data-testid="stContainer"] {
+    padding-top: 0.3rem !important;
+    padding-bottom: 0.3rem !important;
+    }
+
+    /* Ajustar separación en sliders */
+    [data-baseweb="slider"] {
+    margin-top: 0.3rem !important;
+    margin-bottom: 0.3rem !important;
+    }
+
+    /* Reducir margen de subtítulos y textos */
+    h2, h3, label, p, .stMarkdown {
+    margin-top: 0.3rem !important;
+    margin-bottom: 0.3rem !important;
+    }
+
+    /* Compactar los inputs numéricos y selectboxes */
+    .stNumberInput, .stSelectbox, .stTextInput {
+    margin-bottom: 0.5rem !important;
+    }
+
+    /* --- Ajustar separación entre controles específicos --- */
+
+    /* Reducir espacio entre selectbox y text_input */
+    div[data-testid="stSelectbox"] + div[data-testid="stTextInput"] {
+    margin-top: -0.4rem !important;
+    }
+
+    /* Reducir espacio entre los sliders Alpha y Sigma */
+    div[data-testid="stSlider"]:has(label:contains("Alpha")) {
+    margin-bottom: 0.1rem !important;
+    }
+    div[data-testid="stSlider"]:has(label:contains("Sigma")) {
+    margin-top: -0.1rem !important;
+    }
+
+    /* También ajustar los divisores cercanos */
+    hr {
+    margin-top: 0.3rem !important;
+    margin-bottom: 0.3rem !important;
+    }
+
     /* Responsive: en móvil las columnas se apilan */
     @media (max-width: 768px) {
         .element-container [data-testid="column"] {
@@ -94,26 +143,10 @@ st.markdown("""
             Buscador de Propiedades Inteligente
         </h1>
         <p style="color: #666; font-size: 1rem; margin-top: 0.5rem;">
-            Encuentra tu propiedad ideal usando búsqueda inteligente por mapa y texto
+            Encuentra tu propiedad ideal usando búsqueda inteligente por mapa
         </p>
     </div>
 """, unsafe_allow_html=True)
-
-# Lista simple de stopwords en español (sklearn nativamente solo soporta 'english')
-SPANISH_STOPWORDS = [
-    "de", "la", "que", "el", "en", "y", "a", "los", "del", "se", "las", "por", "un",
-    "para", "con", "no", "una", "su", "al", "lo", "como", "más", "pero", "sus", "le",
-    "ya", "o", "fue", "este", "ha", "sí", "porque", "esta", "son", "entre", "cuando",
-    "muy", "sin", "sobre", "también", "me", "hasta", "hay", "donde", "quien", "desde",
-    "todo", "nos", "durante", "todos", "uno", "les", "ni", "contra", "otros", "ese",
-    "eso", "ante", "ellos", "e", "esto", "mí", "antes", "algunos", "qué", "unos", "yo",
-    "otro", "otras", "otra", "él", "tanto", "esa", "estos", "mucho", "quienes", "nada",
-    "muchos", "cual", "poco", "ella", "estar", "estas", "algunas", "algo", "nosotros",
-    "mi", "mis", "tú", "te", "ti", "tu", "tus", "ellas", "nosotras", "vosotros",
-    "vosotras", "os", "mío", "mía", "míos", "mías", "tuyo", "tuya", "tuyos", "tuyas",
-    "suyo", "suya", "suyos", "suyas", "nuestro", "nuestra", "nuestros", "nuestras",
-    "vuestro", "vuestra", "vuestros", "vuestras", "esos", "esas"
-]
 
 # --- Utilidades de imagen: descarga y recorte a relación 8:5 (400x250) ---
 TARGET_ASPECT = 8 / 5
@@ -164,6 +197,26 @@ def prepare_card_image(url: str) -> Image.Image | None:
         return img
     except Exception:
         return None
+
+def offset_lat_lon(lat: float, lon: float, i: int, meters: float = 6.0) -> tuple[float, float]:
+    """Return a small offset lat/lon around the original point using i as an index.
+
+    i=0 returns the original point (no offset). For i>0 returns points arranged
+    on a small circle with radius proportional to meters * i.
+    """
+    if i <= 0:
+        return lat, lon
+    # angle spread using the index to avoid stacking
+    angle = (i) * (2 * pi / 8)
+    dx = meters * cos(angle)
+    dy = meters * sin(angle)
+    # meters to degrees conversion
+    dlat = dy / 111111.0
+    # adjust lon conversion by latitude
+    lat_rad = radians(lat)
+    meters_per_deg_lon = 111111.0 * cos(lat_rad) if cos(lat_rad) != 0 else 111111.0
+    dlon = dx / meters_per_deg_lon
+    return lat + dlat, lon + dlon
 
 def render_full_width_image(img: Image.Image | None, fallback_url: str | None = None) -> None:
     """Render a full-width image without lightbox using HTML.
@@ -250,8 +303,7 @@ data = [
 df = pd.DataFrame(data)
 
 # --- Vectorización de descripciones ---
-vectorizer = TfidfVectorizer(stop_words=SPANISH_STOPWORDS)
-embeddings = vectorizer.fit_transform(df["descripcion"])
+
 
 def render_card(row: pd.Series, extra_label: str | None = None, show_number: bool = True, number: int | None = None) -> None:
     with st.container(border=True):
@@ -325,9 +377,9 @@ try:
             if modo_texto == "Texto libre":
                 # Búsqueda por texto libre
                 texto_busqueda = st.text_input(
-                    "Texto de búsqueda (opcional)",
+                    "Texto de búsqueda",
                     value="",
-                    placeholder="Ej: casa con jardín y pileta",
+                    placeholder="Ej: departamento con jardín y pileta",
                     help="Busque propiedades por características",
                     key="texto_busqueda_mapa"
                 )
@@ -380,23 +432,25 @@ try:
             
             # Sliders para alpha y sigma
             alpha = st.slider(
-                "Alpha (importancia de características de la casa)",
+                "¿Preferís que esté cerca de tus puntos o que cumpla más con lo que buscás?",
                 min_value=0.1,
                 max_value=0.9,
                 value=0.8,
                 step=0.05,
-                help="Más alto = más importancia a las características de la casa",
+                help="Subí el valor si querés priorizar las características de la casa (como jardín, pileta, tamaño, etc.) por sobre la ubicación.",
                 key="alpha_mapa"
             )
+
             sigma = st.slider(
-                "Sigma (distancia de penalización en km)",
+                "¿Hasta qué distancia te gustaría que busquemos alrededor de tus puntos?",
                 min_value=1.0,
                 max_value=20.0,
                 value=4.0,
                 step=0.5,
-                help="Después de cuántos km promedio se penaliza la distancia",
+                help="Un valor más alto amplía la zona de búsqueda.",
                 key="sigma_mapa"
             )
+
             
             # Separador
             st.divider()
@@ -416,7 +470,12 @@ try:
             if st.button("Buscar propiedades", use_container_width=True, key="buscar_propiedades_mapa"):
                 # Puede buscar solo por texto, solo por puntos, o ambos
                 if not texto_busqueda.strip() and not st.session_state["selected_points"]:
-                    st.warning("⚠️ Debe proporcionar texto de búsqueda o seleccionar puntos en el mapa (o ambos).")
+                    # Mostrar advertencia como toast para no romper el layout
+                    try:
+                        st.toast("Debe proporcionar texto de búsqueda o seleccionar puntos en el mapa (o ambos).", icon="⚠️")
+                    except Exception:
+                        # Fallback si st.toast no está disponible en la versión de streamlit
+                        st.warning("Debe proporcionar texto de búsqueda o seleccionar puntos en el mapa (o ambos).")
                 else:
                     # Preparar coordenadas como objetos GeoPoint (si hay puntos)
                     coordenadas = None
@@ -462,7 +521,11 @@ try:
             
             # Puntos seleccionados (debajo del card)
             if st.session_state["selected_points"]:
-                st.subheader(f"Puntos seleccionados ({len(st.session_state['selected_points'])})")
+                # Usar markdown con estilo más pequeño en lugar de st.subheader
+                st.markdown(
+                    f"<h3 id='puntos-seleccionados' style='font-size:1rem; margin-bottom:0.25rem; margin-top:0.5rem;'>Puntos seleccionados ({len(st.session_state['selected_points'])})</h3>",
+                    unsafe_allow_html=True,
+                )
                 points_to_remove = []
                 for idx, point in enumerate(st.session_state["selected_points"]):
                     address = point.get('address', 'Sin dirección')
@@ -473,8 +536,16 @@ try:
                         short_address = ', '.join(address_parts[:3]) + ','
                     else:
                         short_address = address
-                    st.markdown(f"<p style='font-size: 0.95rem; margin: 0.2rem 0;'>{short_address}</p>", unsafe_allow_html=True)
-                    st.markdown(f"<p style='font-size: 0.85rem; color: #666; margin-top: 0; margin-bottom: 0.8rem;'>Lat: {point['lat']:.6f}, Lon: {point['lon']:.6f}</p>", unsafe_allow_html=True)
+                    # Texto más pequeño para la lista de puntos seleccionados
+                    st.markdown(
+                        f"<p style='font-size: 0.75rem; margin: 0.05rem 0; color: #333;'>{short_address}</p>",
+                        unsafe_allow_html=True
+                    )
+                    st.markdown(
+                        f"<p style='font-size: 0.65rem; color: #666; margin-top: 0; margin-bottom: 0.4rem;'>"
+                        f"Lat: {point['lat']:.6f}, Lon: {point['lon']:.6f}</p>",
+                        unsafe_allow_html=True
+                    )
                     if st.button("Eliminar", key=f"remove_{idx}", use_container_width=True):
                         points_to_remove.append(idx)
                 
@@ -609,25 +680,60 @@ try:
             if len(all_locations) > 1:
                 m.fit_bounds(all_locations)
             
+            # Preparar offsets para puntos seleccionados (evitar solapamiento)
+            sel_points = st.session_state["selected_points"]
+            sel_counts = {}
+            for p in sel_points:
+                key = (round(float(p.get("lat", 0)), 6), round(float(p.get("lon", 0)), 6))
+                sel_counts[key] = sel_counts.get(key, 0) + 1
+
+            sel_seen = {}
             # Agregar marcadores para puntos seleccionados (rojos)
-            for idx, point in enumerate(st.session_state["selected_points"]):
+            for idx, point in enumerate(sel_points):
                 address = point.get('address', 'Sin dirección')
                 popup_html_ref = f"""
-                <div style="min-width: 250px; font-family: Arial, sans-serif; padding: 5px;">
-                    <h3 style="font-size: 17px; font-weight: bold; margin: 5px 0; color: #d32f2f;">📍 Punto de referencia {idx + 1}</h3>
-                    <p style="font-size: 15px; margin: 8px 0; line-height: 1.4;">{address}</p>
-                    <p style="font-size: 13px; margin: 5px 0; color: #666;">Click en el mapa para eliminar</p>
+                <div style="min-width: 220px; font-family: Arial, sans-serif; padding: 4px;">
+                    <h3 style="font-size: 14px; font-weight: bold; margin: 4px 0; color: #d32f2f;">📍 Punto</h3>
+                    <p style="font-size: 12px; margin: 6px 0; line-height: 1.3;">{address}</p>
+                    <p style="font-size: 11px; margin: 4px 0; color: #666;">Click en el mapa para eliminar</p>
                 </div>
                 """
+                # Aplicar pequeño offset si hay varios puntos en la misma coordenada
+                try:
+                    lat0 = float(point["lat"])
+                    lon0 = float(point["lon"])
+                except Exception:
+                    lat0, lon0 = point.get("lat"), point.get("lon")
+                key = (round(float(lat0), 6), round(float(lon0), 6))
+                seen = sel_seen.get(key, 0)
+                sel_seen[key] = seen + 1
+                lat_off, lon_off = offset_lat_lon(lat0, lon0, seen)
+
+                # Usar icon más pequeño y menos padding (sin número)
                 folium.Marker(
-                    location=[point["lat"], point["lon"]],
-                    popup=folium.Popup(popup_html_ref, max_width=300),
-                    tooltip=f"Punto {idx + 1}",
-                    icon=folium.Icon(color="red", icon="info-sign", icon_size=(25, 25))
+                    location=[lat_off, lon_off],
+                    popup=folium.Popup(popup_html_ref, max_width=260),
+                    tooltip=folium.Tooltip("Punto de referencia", sticky=True),
+                    icon=folium.DivIcon(
+                        html=f'<div style="background-color: #d9534f; border-radius: 50%; width: 18px; height: 18px; display: block; border: 2px solid white;"></div>',
+                        icon_size=(18, 18),
+                        icon_anchor=(9, 9)
+                    ),
+                    zIndexOffset=0
                 ).add_to(m)
             
+            # Preparar offsets para propiedades encontradas (evitar solapamiento)
+            props = st.session_state["found_properties"]
+            prop_counts = {}
+            for p in props:
+                if p.get("lat") is None or p.get("lon") is None:
+                    continue
+                key = (round(float(p.get("lat", 0)), 6), round(float(p.get("lon", 0)), 6))
+                prop_counts[key] = prop_counts.get(key, 0) + 1
+
+            prop_seen = {}
             # Agregar marcadores para propiedades encontradas (azules con números)
-            for idx, prop in enumerate(st.session_state["found_properties"], 1):
+            for idx, prop in enumerate(props, 1):
                 if prop.get("lat") is not None and prop.get("lon") is not None:
                     try:
                         lat = float(prop["lat"])
@@ -644,13 +750,12 @@ try:
                             distancia = f'{prop.get("distance_km", 0):.2f} km' if prop.get('distance_km') is not None else None
                             puntaje = f'{prop.get("score_total", 0):.3f}' if prop.get('score_total') is not None else None
                             
-                            # Crear tooltip con descripción (se muestra al pasar el mouse)
+                            # Crear tooltip compacto (sin descripción) con ancho máximo y wrapping
                             tooltip_html = f"""
-                            <div style="max-width: 300px; font-family: Arial, sans-serif;">
-                                <h4 style="font-size: 16px; font-weight: bold; margin: 5px 0; color: #1f77b4;">#{idx} - {ciudad}</h4>
-                                <p style="font-size: 14px; margin: 5px 0; line-height: 1.4;"><b>Ubicación:</b> {ubicacion}</p>
-                                <p style="font-size: 14px; margin: 5px 0; color: #2e7d32; font-weight: bold;"><b>Alquiler:</b> ${alquiler}</p>
-                                <p style="font-size: 13px; margin: 8px 0; line-height: 1.5; color: #555; border-top: 1px solid #ddd; padding-top: 5px;"><b>Descripción:</b><br>{descripcion}</p>
+                                <div style="max-width: 260px; font-family: Arial, sans-serif; white-space: normal; word-wrap: break-word; overflow-wrap: break-word;">
+                                <h4 style="font-size: 14px; font-weight: bold; margin: 4px 0; color: #1f77b4;">#{idx} - {ciudad}</h4>
+                                <div style="font-size: 13px; margin: 3px 0; line-height: 1.2;">Ubicación:<br/>{ubicacion}</div>
+                                <div style="font-size: 13px; margin: 3px 0; color: #2e7d32; font-weight: bold;">Alquiler:<br/>${alquiler}</div>
                             </div>
                             """
                             
@@ -665,20 +770,36 @@ try:
                                 {f'<p style="font-size: 14px; margin: 8px 0;"><b>Puntaje:</b> {puntaje}</p>' if puntaje else ''}
                             </div>
                             """
+                            # Aplicar pequeño offset si hay varias propiedades en la misma coordenada
+                            keyp = (round(float(lat), 6), round(float(lon), 6))
+                            seenp = prop_seen.get(keyp, 0)
+                            prop_seen[keyp] = seenp + 1
+                            latp, lonp = offset_lat_lon(lat, lon, seenp, meters=8.0)
+
                             folium.Marker(
-                                location=[lat, lon],
+                                location=[latp, lonp],
                                 popup=folium.Popup(popup_html, max_width=350),
                                 tooltip=folium.Tooltip(tooltip_html, sticky=True),
                                 icon=folium.DivIcon(
                                     html=f'<div style="background-color: #3388ff; color: white; border-radius: 50%; width: 35px; height: 35px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 16px; border: 3px solid white; box-shadow: 0 3px 6px rgba(0,0,0,0.4);">{idx}</div>',
                                     icon_size=(35, 35),
                                     icon_anchor=(17, 17)
-                                )
+                                ),
+                                zIndexOffset=1000
                             ).add_to(m)
                     except (ValueError, TypeError):
                         continue
             
             # Mostrar mapa
+            # Agregar leyenda: rojo = puntos de referencia, azul = propiedades encontradas
+            legend_html = '''
+                <div style="position: fixed; bottom: 80px; left: 10px; z-index:9999; background: white; padding: 8px; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.15); font-size:13px;">
+                    <div style="display:flex;align-items:center;margin-bottom:4px;"><div style='width:14px;height:14px;background:#d9534f;border-radius:50%;margin-right:8px;border:2px solid #fff;'></div>Puntos de referencia</div>
+                    <div style="display:flex;align-items:center;"><div style='width:16px;height:16px;background:#3388ff;border-radius:50%;margin-right:8px;border:2px solid #fff;'></div>Propiedades encontradas</div>
+                </div>
+            '''
+            m.get_root().html.add_child(folium.Element(legend_html))
+
             map_data = st_folium(m, height=800, use_container_width=True, key="main_map", returned_objects=["last_clicked", "last_object_clicked"])
         
         # Detectar marcadores agregados por el Geocoder
@@ -724,7 +845,8 @@ try:
         if "last_processed_click" not in st.session_state:
             st.session_state["last_processed_click"] = None
         
-        if map_data and map_data.get("last_clicked") and "lat" in map_data["last_clicked"] and "lng" in map_data["last_clicked"]:
+    # Evitar procesar last_clicked si last_object_clicked está presente (clicks en marcadores)
+    if map_data and not map_data.get("last_object_clicked") and map_data.get("last_clicked") and "lat" in map_data["last_clicked"] and "lng" in map_data["last_clicked"]:
             clicked_lat = map_data["last_clicked"]["lat"]
             clicked_lon = map_data["last_clicked"]["lng"]
             
@@ -787,6 +909,7 @@ try:
             for j, col in enumerate(cols):
                 if i + j < len(props):
                     prop = props[i + j]
+                    number = i + j + 1  # numeración para correlacionar con marcadores del mapa
                     with col:
                         row = {
                             "ciudad": prop.get("ciudad") or "",
@@ -807,7 +930,8 @@ try:
                             dist_text = f"Distancia: {prop['distance_km']:.2f} km"
                             extra = f"{extra} | {dist_text}" if extra else dist_text
                         # Mostrar sin numeración (show_number=False)
-                        render_card(pd.Series(row), extra_label=extra, show_number=False)
+                        # Mostrar numeración para correlacionar con el mapa
+                        render_card(pd.Series(row), extra_label=extra, show_number=True, number=number)
                         if isinstance(prop.get("url"), str) and prop.get("url"):
                             try:
                                 st.link_button("Ver aviso", prop["url"], use_container_width=True)
