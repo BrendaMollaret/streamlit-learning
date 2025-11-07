@@ -715,9 +715,9 @@ try:
                     popup=folium.Popup(popup_html_ref, max_width=260),
                     tooltip=folium.Tooltip("Punto de referencia", sticky=True),
                     icon=folium.DivIcon(
-                        html=f'<div style="background-color: #d9534f; border-radius: 50%; width: 18px; height: 18px; display: block; border: 2px solid white;"></div>',
-                        icon_size=(18, 18),
-                        icon_anchor=(9, 9)
+                        html=f'<div style="background-color: #d9534f; border-radius: 50%; width: 32px; height: 32px; display: block; border: 3px solid white;"></div>',
+                        icon_size=(32, 32),
+                        icon_anchor=(16, 16)
                     ),
                     zIndexOffset=0
                 ).add_to(m)
@@ -750,13 +750,13 @@ try:
                             distancia = f'{prop.get("distance_km", 0):.2f} km' if prop.get('distance_km') is not None else None
                             puntaje = f'{prop.get("score_total", 0):.3f}' if prop.get('score_total') is not None else None
                             
-                            # Crear tooltip compacto (sin descripción) con ancho máximo y wrapping
+                            # Tooltip cuadrado, más ancho y alto para mostrar texto largo
                             tooltip_html = f"""
-                                <div style="max-width: 260px; font-family: Arial, sans-serif; white-space: normal; word-wrap: break-word; overflow-wrap: break-word;">
-                                <h4 style="font-size: 14px; font-weight: bold; margin: 4px 0; color: #1f77b4;">#{idx} - {ciudad}</h4>
-                                <div style="font-size: 13px; margin: 3px 0; line-height: 1.2;">Ubicación:<br/>{ubicacion}</div>
-                                <div style="font-size: 13px; margin: 3px 0; color: #2e7d32; font-weight: bold;">Alquiler:<br/>${alquiler}</div>
-                            </div>
+                                <div style="width: 300px; height: 120px; font-family: Arial, sans-serif; white-space: normal; word-wrap: break-word; overflow-wrap: break-word; display: flex; flex-direction: column; justify-content: center; align-items: flex-start;">
+                                    <h4 style="font-size: 15px; font-weight: bold; margin: 6px 0; color: #1f77b4;">#{idx} - {ciudad}</h4>
+                                    <div style="font-size: 14px; margin: 6px 0; line-height: 1.2;">Ubicación:<br/>{ubicacion}</div>
+                                    <div style="font-size: 14px; margin: 6px 0; color: #2e7d32; font-weight: bold;">Alquiler:<br/>${alquiler}</div>
+                                </div>
                             """
                             
                             popup_html = f"""
