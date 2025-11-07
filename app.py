@@ -78,11 +78,26 @@ st.markdown("""
             padding-left: 1rem !important;
             padding-right: 1rem !important;
         }
+        /* Asegurar que las columnas se apilen en móvil */
+        [data-testid="column"] {
+            width: 100% !important;
+            flex: 0 0 100% !important;
+        }
     }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("Buscador de Propiedades Inteligente")
+# Header centrado
+st.markdown("""
+    <div style="text-align: center; padding: 2rem 0;">
+        <h1 style="font-size: 2.5rem; font-weight: bold; background: linear-gradient(to right, #1f77b4, #ff7f0e); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; margin-bottom: 0.5rem;">
+            Buscador de Propiedades Inteligente
+        </h1>
+        <p style="color: #666; font-size: 1rem; margin-top: 0.5rem;">
+            Encuentra tu propiedad ideal usando búsqueda inteligente por mapa y texto
+        </p>
+    </div>
+""", unsafe_allow_html=True)
 
 # Lista simple de stopwords en español (sklearn nativamente solo soporta 'english')
 SPANISH_STOPWORDS = [
@@ -239,10 +254,11 @@ vectorizer = TfidfVectorizer(stop_words=SPANISH_STOPWORDS)
 embeddings = vectorizer.fit_transform(df["descripcion"])
 
 # --- Modo de búsqueda ---
+# Se mostrará dentro del card de controles en el modo Mapa, pero aquí para los otros modos
 mood = st.selectbox(
     "Modo de búsqueda",
     ["Texto libre", "Parámetros", "Mapa"],
-    index=0
+    index=2  # Cambiar a 2 para que "Mapa" sea el predeterminado
 )
 
 def render_card(row: pd.Series, extra_label: str | None = None, show_number: bool = True, number: int | None = None) -> None:
@@ -459,332 +475,329 @@ elif mood == "Mapa":
                 st.error(f"Error inesperado: {e}")
             return None
         
-        # Parámetros de búsqueda arriba del mapa
-        st.subheader("Opciones de búsqueda")
+        # Estructura de dos columnas: izquierda (controles) y derecha (mapa)
+        # Usar proporciones similares al React: izquierda ~400px, derecha el resto
+        col_left, col_right = st.columns([1, 2.5], gap="large")
         
-        # Búsqueda por texto (opcional)
-        texto_busqueda = st.text_input("Texto de búsqueda (opcional)", value="", placeholder="Ej: casa con jardín", help="Busque propiedades por características")
-        
-        # Buscador de lugares en el mapa (opcional) - también disponible directamente en el mapa
-        st.write("**Buscar lugares (opcional):** Puede buscar lugares usando el control en el mapa o el campo de texto abajo.")
-        col_search, col_add = st.columns([3, 1])
-        with col_search:
-            search_query = st.text_input("Buscar lugar (ej: UTN FRM, Plaza Independencia)", key="place_search", placeholder="Busque un lugar para agregarlo al mapa")
-        with col_add:
-            st.write("")  # Espaciado
-            search_button = st.button("Agregar", use_container_width=True)
-        
-        # Procesar búsqueda de lugares
-        if search_button and search_query:
-            with st.spinner(f"Buscando '{search_query}'..."):
-                result = geocode_location(search_query)
-                if result:
-                    # Verificar si ya existe
-                    exists = any(
-                        abs(p["lat"] - result["lat"]) < 0.0001 and 
-                        abs(p["lon"] - result["lon"]) < 0.0001
-                        for p in st.session_state["selected_points"]
-                    )
-                    if not exists:
-                        st.session_state["selected_points"].append(result)
-                        st.success(f"✅ Agregado: {result['address']}")
-                    else:
-                        st.warning("Este lugar ya está en la lista.")
-                else:
-                    st.error("No se encontró el lugar. Intente con otro nombre.")
-        
-        # Sliders para alpha y sigma
-        col_alpha, col_sigma = st.columns(2)
-        with col_alpha:
-            alpha = st.slider(
-                "Alpha (importancia de características de la casa)",
-                min_value=0.1,
-                max_value=0.9,
-                value=0.8,
-                step=0.05,
-                help="Más alto = más importancia a las características de la casa"
-            )
-        with col_sigma:
-            sigma = st.slider(
-                "Sigma (distancia de penalización en km)",
-                min_value=1.0,
-                max_value=20.0,
-                value=4.0,
-                step=0.5,
-                help="Después de cuántos km promedio se penaliza la distancia"
-            )
-        
-        # Parámetros adicionales
-        col_modelo, col_qty = st.columns(2)
-        with col_modelo:
-            modelo = "custom_embedding"
-        with col_qty:
-            output_qty = st.number_input("Cantidad de resultados", min_value=1, max_value=20, value=10, step=1, key="output_qty_mapa")
-        
-        # Botón de búsqueda
-        if st.button("Buscar propiedades", use_container_width=True):
-            # Puede buscar solo por texto, solo por puntos, o ambos
-            if not texto_busqueda.strip() and not st.session_state["selected_points"]:
-                st.warning("⚠️ Debe proporcionar texto de búsqueda o seleccionar puntos en el mapa (o ambos).")
-            else:
-                # Preparar coordenadas como objetos GeoPoint (si hay puntos)
-                coordenadas = None
-                if st.session_state["selected_points"]:
-                    coordenadas = [
-                        GeoPoint(lat=p["lat"], lon=p["lon"])
-                        for p in st.session_state["selected_points"]
-                    ]
+        with col_left:
+            # Card con controles de búsqueda
+            with st.container(border=True):
+                # Modo de búsqueda (mostrado aquí para consistencia con React)
+                # Nota: El modo se controla desde arriba, pero lo mostramos aquí para la UI
+                st.markdown("**Modo de búsqueda:** Mapa")
                 
-                with st.spinner("Consultando recomendaciones..."):
-                    try:
-                        input_data = UserInput(
-                            texto=texto_busqueda if texto_busqueda.strip() else "",
-                            modelo=modelo,
-                            output_qty=int(output_qty),
-                            coordenadas=coordenadas,
-                            alpha=float(alpha),
-                            sigma=float(sigma)
-                        )
-                        data_out = process_user_input(input_data)
+                # Búsqueda por texto (opcional)
+                texto_busqueda = st.text_input(
+                    "Texto de búsqueda (opcional)",
+                    value="",
+                    placeholder="Ej: casa con jardín",
+                    help="Busque propiedades por características",
+                    key="texto_busqueda_mapa"
+                )
+                
+               
+                
+              
+                
+                # Separador
+                st.divider()
+                
+                # Sliders para alpha y sigma
+                alpha = st.slider(
+                    "Alpha (importancia de características de la casa)",
+                    min_value=0.1,
+                    max_value=0.9,
+                    value=0.8,
+                    step=0.05,
+                    help="Más alto = más importancia a las características de la casa",
+                    key="alpha_mapa"
+                )
+                sigma = st.slider(
+                    "Sigma (distancia de penalización en km)",
+                    min_value=1.0,
+                    max_value=20.0,
+                    value=4.0,
+                    step=0.5,
+                    help="Después de cuántos km promedio se penaliza la distancia",
+                    key="sigma_mapa"
+                )
+                
+                # Separador
+                st.divider()
+                
+                # Cantidad de resultados
+                output_qty = st.number_input(
+                    "Cantidad de resultados",
+                    min_value=1,
+                    max_value=20,
+                    value=10,
+                    step=1,
+                    key="output_qty_mapa"
+                )
+                
+                # Botón de búsqueda
+                modelo = "custom_embedding"
+                if st.button("Buscar propiedades", use_container_width=True, key="buscar_propiedades_mapa"):
+                    # Puede buscar solo por texto, solo por puntos, o ambos
+                    if not texto_busqueda.strip() and not st.session_state["selected_points"]:
+                        st.warning("⚠️ Debe proporcionar texto de búsqueda o seleccionar puntos en el mapa (o ambos).")
+                    else:
+                        # Preparar coordenadas como objetos GeoPoint (si hay puntos)
+                        coordenadas = None
+                        if st.session_state["selected_points"]:
+                            coordenadas = [
+                                GeoPoint(lat=p["lat"], lon=p["lon"])
+                                for p in st.session_state["selected_points"]
+                            ]
                         
-                        if data_out.get("status") == "error":
-                            st.error(f"Error: {data_out.get('message', 'Error desconocido')}")
-                        else:
-                            # Get properties from the output
-                            output = data_out.get("output", {})
-                            if isinstance(output, dict) and "error" in output:
-                                st.error(f"Error: {output.get('error', 'Error desconocido')}")
-                            else:
-                                props = output.get("properties", []) if isinstance(output, dict) else []
-                                if not props:
-                                    st.info("Sin resultados.")
-                                    st.session_state["found_properties"] = []
+                        with st.spinner("Consultando recomendaciones..."):
+                            try:
+                                input_data = UserInput(
+                                    texto=texto_busqueda if texto_busqueda.strip() else "",
+                                    modelo=modelo,
+                                    output_qty=int(output_qty),
+                                    coordenadas=coordenadas,
+                                    alpha=float(alpha),
+                                    sigma=float(sigma)
+                                )
+                                data_out = process_user_input(input_data)
+                                
+                                if data_out.get("status") == "error":
+                                    st.error(f"Error: {data_out.get('message', 'Error desconocido')}")
                                 else:
-                                    # Guardar propiedades en session_state para mostrarlas en el mapa
-                                    st.session_state["found_properties"] = props
-                                    st.success(f"✅ Se encontraron {len(props)} propiedades. Ver el mapa y el listado abajo.")
-                                    st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al procesar la solicitud: {e}")
-                        import traceback
-                        st.code(traceback.format_exc())
-        
-        st.write("**Seleccione puntos en el mapa haciendo click o busque lugares arriba.**")
-        
-        # Crear mapa y calcular centro y bounds
-        all_locations = []
-        
-        # Agregar puntos seleccionados
-        for point in st.session_state["selected_points"]:
-            all_locations.append([point["lat"], point["lon"]])
-        
-        # Agregar propiedades encontradas
-        for prop in st.session_state["found_properties"]:
-            if prop.get("lat") is not None and prop.get("lon") is not None:
-                try:
-                    lat = float(prop["lat"])
-                    lon = float(prop["lon"])
-                    if pd.notna(lat) and pd.notna(lon):
-                        all_locations.append([lat, lon])
-                except (ValueError, TypeError):
-                    continue
-        
-        # Calcular centro y zoom
-        if all_locations:
-            # Calcular bounds
-            lats = [loc[0] for loc in all_locations]
-            lons = [loc[1] for loc in all_locations]
-            center = (sum(lats) / len(lats), sum(lons) / len(lons))
+                                    # Get properties from the output
+                                    output = data_out.get("output", {})
+                                    if isinstance(output, dict) and "error" in output:
+                                        st.error(f"Error: {output.get('error', 'Error desconocido')}")
+                                    else:
+                                        props = output.get("properties", []) if isinstance(output, dict) else []
+                                        if not props:
+                                            st.info("Sin resultados.")
+                                            st.session_state["found_properties"] = []
+                                        else:
+                                            # Guardar propiedades en session_state para mostrarlas en el mapa
+                                            st.session_state["found_properties"] = props
+                                            st.success(f"✅ Se encontraron {len(props)} propiedades. Ver el mapa y el listado abajo.")
+                                            st.rerun()
+                            except Exception as e:
+                                st.error(f"Error al procesar la solicitud: {e}")
+                                import traceback
+                                st.code(traceback.format_exc())
             
-            # Calcular zoom apropiado basado en la dispersión
-            lat_range = max(lats) - min(lats)
-            lon_range = max(lons) - min(lons)
-            max_range = max(lat_range, lon_range)
+            # Puntos seleccionados (debajo del card)
+            if st.session_state["selected_points"]:
+                st.subheader(f"Puntos seleccionados ({len(st.session_state['selected_points'])})")
+                points_to_remove = []
+                for idx, point in enumerate(st.session_state["selected_points"]):
+                    address = point.get('address', 'Sin dirección')
+                    st.markdown(f"<p style='font-size: 1rem; margin: 0.3rem 0;'><strong>Punto {idx + 1}</strong></p>", unsafe_allow_html=True)
+                    st.markdown(f"<p style='font-size: 0.95rem; margin: 0.2rem 0;'>{address}</p>", unsafe_allow_html=True)
+                    st.markdown(f"<p style='font-size: 0.85rem; color: #666; margin-top: 0; margin-bottom: 0.8rem;'>Lat: {point['lat']:.6f}, Lon: {point['lon']:.6f}</p>", unsafe_allow_html=True)
+                    if st.button("Eliminar", key=f"remove_{idx}", use_container_width=True):
+                        points_to_remove.append(idx)
+                
+                # Eliminar puntos marcados para eliminar
+                for idx in sorted(points_to_remove, reverse=True):
+                    removed_point = st.session_state["selected_points"].pop(idx)
+                    st.success(f"✅ Punto eliminado: {removed_point.get('address', 'Sin dirección')}")
+                if points_to_remove:
+                    st.rerun()
+        
+        with col_right:
+            # Mapa en la columna derecha
+            # Crear mapa y calcular centro y bounds
+            all_locations = []
             
-            if max_range > 0.1:
-                zoom_start = 10
-            elif max_range > 0.05:
-                zoom_start = 11
-            elif max_range > 0.02:
-                zoom_start = 12
+            # Agregar puntos seleccionados
+            for point in st.session_state["selected_points"]:
+                all_locations.append([point["lat"], point["lon"]])
+            
+            # Agregar propiedades encontradas
+            for prop in st.session_state["found_properties"]:
+                if prop.get("lat") is not None and prop.get("lon") is not None:
+                    try:
+                        lat = float(prop["lat"])
+                        lon = float(prop["lon"])
+                        if pd.notna(lat) and pd.notna(lon):
+                            all_locations.append([lat, lon])
+                    except (ValueError, TypeError):
+                        continue
+            
+            # Calcular centro y zoom
+            if all_locations:
+                # Calcular bounds
+                lats = [loc[0] for loc in all_locations]
+                lons = [loc[1] for loc in all_locations]
+                center = (sum(lats) / len(lats), sum(lons) / len(lons))
+                
+                # Calcular zoom apropiado basado en la dispersión
+                lat_range = max(lats) - min(lats)
+                lon_range = max(lons) - min(lons)
+                max_range = max(lat_range, lon_range)
+                
+                if max_range > 0.1:
+                    zoom_start = 10
+                elif max_range > 0.05:
+                    zoom_start = 11
+                elif max_range > 0.02:
+                    zoom_start = 12
+                else:
+                    zoom_start = 13
             else:
-                zoom_start = 13
-        else:
-            center = (-32.889, -68.845)
-            zoom_start = 11
-        
-        m = folium.Map(location=center, zoom_start=zoom_start, tiles="OpenStreetMap")
-        folium.LatLngPopup().add_to(m)
-        
-        # Agregar control de búsqueda directamente en el mapa con estilo personalizado
-        try:
-            from folium.plugins import Geocoder
+                center = (-32.889, -68.845)
+                zoom_start = 11
             
-            # Agregar CSS personalizado para hacer el control de búsqueda más grande
-            geocoder_html = """
-            <style>
-            .leaflet-control-geocoder {
-                font-size: 18px !important;
-            }
-            .leaflet-control-geocoder input {
-                font-size: 18px !important;
-                padding: 10px !important;
-                height: 45px !important;
-                min-width: 300px !important;
-            }
-            .leaflet-control-geocoder a {
-                font-size: 18px !important;
-                padding: 10px !important;
-            }
-            .leaflet-control-geocoder-form {
-                font-size: 18px !important;
-            }
-            </style>
-            """
-            m.get_root().html.add_child(folium.Element(geocoder_html))
+            m = folium.Map(location=center, zoom_start=zoom_start, tiles="OpenStreetMap")
+            folium.LatLngPopup().add_to(m)
             
-            # Crear Geocoder - cuando se busca un lugar, agrega un marcador automáticamente
-            geocoder = Geocoder(
-                collapsed=False,
-                position='topleft',
-                add_marker=True
-            )
-            geocoder.add_to(m)
-            
-            # Agregar JavaScript para capturar automáticamente cuando el Geocoder agrega un marcador
-            # y guardar las coordenadas en un elemento HTML oculto que podemos leer desde Streamlit
-            geocoder_script = """
-            <script>
-            (function() {
-                // Esperar a que el mapa y el Geocoder estén listos
-                setTimeout(function() {
-                    if (typeof L !== 'undefined') {
-                        // Buscar el mapa de Folium
-                        var maps = document.querySelectorAll('.folium-map');
-                        maps.forEach(function(mapElement) {
-                            var map = mapElement._leaflet_id ? L.map(mapElement._leaflet_id) : null;
-                            if (map) {
-                                // Interceptar cuando el Geocoder agrega un marcador
-                                map.on('geocoder_result', function(e) {
-                                    if (e.result && e.result.center) {
-                                        var lat = e.result.center.lat;
-                                        var lng = e.result.center.lng;
-                                        var name = e.result.name || '';
-                                        
-                                        // Guardar en un elemento oculto
-                                        var hiddenInput = document.getElementById('geocoder_result');
-                                        if (!hiddenInput) {
-                                            hiddenInput = document.createElement('input');
-                                            hiddenInput.type = 'hidden';
-                                            hiddenInput.id = 'geocoder_result';
-                                            document.body.appendChild(hiddenInput);
+            # Agregar control de búsqueda directamente en el mapa con estilo personalizado
+            try:
+                from folium.plugins import Geocoder
+                
+                # Agregar CSS personalizado para hacer el control de búsqueda más grande
+                geocoder_html = """
+                <style>
+                .leaflet-control-geocoder {
+                    font-size: 18px !important;
+                }
+                .leaflet-control-geocoder input {
+                    font-size: 18px !important;
+                    padding: 10px !important;
+                    height: 45px !important;
+                    min-width: 300px !important;
+                }
+                .leaflet-control-geocoder a {
+                    font-size: 18px !important;
+                    padding: 10px !important;
+                }
+                .leaflet-control-geocoder-form {
+                    font-size: 18px !important;
+                }
+                </style>
+                """
+                m.get_root().html.add_child(folium.Element(geocoder_html))
+                
+                # Crear Geocoder - cuando se busca un lugar, agrega un marcador automáticamente
+                geocoder = Geocoder(
+                    collapsed=False,
+                    position='topleft',
+                    add_marker=True
+                )
+                geocoder.add_to(m)
+                
+                # Agregar JavaScript para capturar automáticamente cuando el Geocoder agrega un marcador
+                geocoder_script = """
+                <script>
+                (function() {
+                    setTimeout(function() {
+                        if (typeof L !== 'undefined') {
+                            var maps = document.querySelectorAll('.folium-map');
+                            maps.forEach(function(mapElement) {
+                                var map = mapElement._leaflet_id ? L.map(mapElement._leaflet_id) : null;
+                                if (map) {
+                                    map.on('geocoder_result', function(e) {
+                                        if (e.result && e.result.center) {
+                                            var lat = e.result.center.lat;
+                                            var lng = e.result.center.lng;
+                                            var name = e.result.name || '';
+                                            
+                                            var hiddenInput = document.getElementById('geocoder_result');
+                                            if (!hiddenInput) {
+                                                hiddenInput = document.createElement('input');
+                                                hiddenInput.type = 'hidden';
+                                                hiddenInput.id = 'geocoder_result';
+                                                document.body.appendChild(hiddenInput);
+                                            }
+                                            hiddenInput.value = JSON.stringify({lat: lat, lng: lng, name: name});
+                                            hiddenInput.dispatchEvent(new Event('change'));
                                         }
-                                        hiddenInput.value = JSON.stringify({lat: lat, lng: lng, name: name});
-                                        hiddenInput.dispatchEvent(new Event('change'));
-                                    }
-                                });
-                            }
-                        });
-                    }
-                }, 2000);
-            })();
-            </script>
-            """
-            m.get_root().html.add_child(folium.Element(geocoder_script))
-        except ImportError:
-            # Si el plugin no está disponible, continuar sin él
-            pass
-        
-        # Si hay múltiples ubicaciones, ajustar bounds
-        if len(all_locations) > 1:
-            m.fit_bounds(all_locations)
-        
-        # Agregar marcadores para puntos seleccionados (rojos)
-        for idx, point in enumerate(st.session_state["selected_points"]):
-            address = point.get('address', 'Sin dirección')
-            popup_html_ref = f"""
-            <div style="min-width: 250px; font-family: Arial, sans-serif; padding: 5px;">
-                <h3 style="font-size: 17px; font-weight: bold; margin: 5px 0; color: #d32f2f;">📍 Punto de referencia {idx + 1}</h3>
-                <p style="font-size: 15px; margin: 8px 0; line-height: 1.4;">{address}</p>
-                <p style="font-size: 13px; margin: 5px 0; color: #666;">Click en el mapa para eliminar</p>
-            </div>
-            """
-            folium.Marker(
-                location=[point["lat"], point["lon"]],
-                popup=folium.Popup(popup_html_ref, max_width=300),
-                tooltip=f"Punto {idx + 1}",
-                icon=folium.Icon(color="red", icon="info-sign", icon_size=(25, 25))
-            ).add_to(m)
-        
-        # Agregar marcadores para propiedades encontradas (azules con números)
-        for idx, prop in enumerate(st.session_state["found_properties"], 1):
-            if prop.get("lat") is not None and prop.get("lon") is not None:
-                try:
-                    lat = float(prop["lat"])
-                    lon = float(prop["lon"])
-                    if pd.notna(lat) and pd.notna(lon):
-                        # Crear popup con información de la propiedad (más legible)
-                        ciudad = prop.get('ciudad', 'N/A')
-                        ubicacion = prop.get('ubicacion', prop.get('direccion', 'N/A'))
-                        alquiler = prop.get('alquiler', 'N/A')
-                        m2 = prop.get('m2_total', 'N/A')
-                        ambientes = prop.get('ambientes', 'N/A')
-                        banos = prop.get('banos', 'N/A')
-                        distancia = f'{prop.get("distance_km", 0):.2f} km' if prop.get('distance_km') is not None else None
-                        puntaje = f'{prop.get("score_total", 0):.3f}' if prop.get('score_total') is not None else None
-                        
-                        popup_html = f"""
-                        <div style="min-width: 280px; font-family: Arial, sans-serif; padding: 5px;">
-                            <h3 style="font-size: 18px; font-weight: bold; margin: 5px 0; color: #1f77b4;">#{idx} - {ciudad}</h3>
-                            <p style="font-size: 15px; margin: 8px 0; line-height: 1.4;"><b style="font-size: 15px;">Ubicación:</b><br>{ubicacion}</p>
-                            <p style="font-size: 16px; margin: 8px 0; color: #2e7d32; font-weight: bold;"><b>Alquiler:</b> ${alquiler}</p>
-                            <p style="font-size: 14px; margin: 8px 0; line-height: 1.5;"><b>m²:</b> {m2} | <b>Amb:</b> {ambientes} | <b>Baños:</b> {banos}</p>
-                            {f'<p style="font-size: 14px; margin: 8px 0;"><b>Distancia:</b> {distancia}</p>' if distancia else ''}
-                            {f'<p style="font-size: 14px; margin: 8px 0;"><b>Puntaje:</b> {puntaje}</p>' if puntaje else ''}
-                        </div>
-                        """
-                        folium.Marker(
-                            location=[lat, lon],
-                            popup=folium.Popup(popup_html, max_width=350),
-                            tooltip=f"#{idx} - {ciudad}",
-                            icon=folium.DivIcon(
-                                html=f'<div style="background-color: #3388ff; color: white; border-radius: 50%; width: 35px; height: 35px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 16px; border: 3px solid white; box-shadow: 0 3px 6px rgba(0,0,0,0.4);">{idx}</div>',
-                                icon_size=(35, 35),
-                                icon_anchor=(17, 17)
-                            )
-                        ).add_to(m)
-                except (ValueError, TypeError):
-                    continue
-        
-        # Mostrar mapa y lista de puntos en columnas (solo si hay puntos seleccionados)
-        if st.session_state["selected_points"]:
-            col_map, col_points = st.columns([2.5, 1])
+                                    });
+                                }
+                            });
+                        }
+                    }, 2000);
+                })();
+                </script>
+                """
+                m.get_root().html.add_child(folium.Element(geocoder_script))
+            except ImportError:
+                pass
             
-            with col_map:
-                # Mostrar mapa con más altura
-                map_data = st_folium(m, height=700, use_container_width=True, key="main_map", returned_objects=["last_clicked", "last_object_clicked"])
+            # Si hay múltiples ubicaciones, ajustar bounds
+            if len(all_locations) > 1:
+                m.fit_bounds(all_locations)
             
-            with col_points:
-                st.subheader("Puntos seleccionados:")
-                # Contenedor con scroll si hay muchos puntos
-                with st.container():
-                    points_to_remove = []
-                    for idx, point in enumerate(st.session_state["selected_points"]):
-                        address = point.get('address', 'Sin dirección')
-                        st.markdown(f"<p style='font-size: 1rem; margin: 0.3rem 0;'>• {address}</p>", unsafe_allow_html=True)
-                        st.markdown(f"<p style='font-size: 0.85rem; color: #666; margin-top: 0; margin-bottom: 0.8rem;'>Lat: {point['lat']:.6f}, Lon: {point['lon']:.6f}</p>", unsafe_allow_html=True)
-                        if st.button("Eliminar", key=f"remove_{idx}", use_container_width=True):
-                            points_to_remove.append(idx)
-                    
-                    # Eliminar puntos marcados para eliminar
-                    for idx in sorted(points_to_remove, reverse=True):
-                        removed_point = st.session_state["selected_points"].pop(idx)
-                        st.success(f"✅ Punto eliminado: {removed_point.get('address', 'Sin dirección')}")
-                    if points_to_remove:
-                        st.rerun()
-        else:
-            # Si no hay puntos, mostrar solo el mapa con más altura
-            map_data = st_folium(m, height=700, use_container_width=True, key="main_map", returned_objects=["last_clicked", "last_object_clicked"])
+            # Agregar marcadores para puntos seleccionados (rojos)
+            for idx, point in enumerate(st.session_state["selected_points"]):
+                address = point.get('address', 'Sin dirección')
+                popup_html_ref = f"""
+                <div style="min-width: 250px; font-family: Arial, sans-serif; padding: 5px;">
+                    <h3 style="font-size: 17px; font-weight: bold; margin: 5px 0; color: #d32f2f;">📍 Punto de referencia {idx + 1}</h3>
+                    <p style="font-size: 15px; margin: 8px 0; line-height: 1.4;">{address}</p>
+                    <p style="font-size: 13px; margin: 5px 0; color: #666;">Click en el mapa para eliminar</p>
+                </div>
+                """
+                folium.Marker(
+                    location=[point["lat"], point["lon"]],
+                    popup=folium.Popup(popup_html_ref, max_width=300),
+                    tooltip=f"Punto {idx + 1}",
+                    icon=folium.Icon(color="red", icon="info-sign", icon_size=(25, 25))
+                ).add_to(m)
+            
+            # Agregar marcadores para propiedades encontradas (azules con números)
+            for idx, prop in enumerate(st.session_state["found_properties"], 1):
+                if prop.get("lat") is not None and prop.get("lon") is not None:
+                    try:
+                        lat = float(prop["lat"])
+                        lon = float(prop["lon"])
+                        if pd.notna(lat) and pd.notna(lon):
+                            # Crear popup con información de la propiedad (más legible)
+                            ciudad = prop.get('ciudad', 'N/A')
+                            ubicacion = prop.get('ubicacion', prop.get('direccion', 'N/A'))
+                            alquiler = prop.get('alquiler', 'N/A')
+                            m2 = prop.get('m2_total', 'N/A')
+                            ambientes = prop.get('ambientes', 'N/A')
+                            banos = prop.get('banos', 'N/A')
+                            descripcion = prop.get('descripcion', 'Sin descripción')
+                            distancia = f'{prop.get("distance_km", 0):.2f} km' if prop.get('distance_km') is not None else None
+                            puntaje = f'{prop.get("score_total", 0):.3f}' if prop.get('score_total') is not None else None
+                            
+                            # Crear tooltip con descripción (se muestra al pasar el mouse)
+                            tooltip_html = f"""
+                            <div style="max-width: 300px; font-family: Arial, sans-serif;">
+                                <h4 style="font-size: 16px; font-weight: bold; margin: 5px 0; color: #1f77b4;">#{idx} - {ciudad}</h4>
+                                <p style="font-size: 14px; margin: 5px 0; line-height: 1.4;"><b>Ubicación:</b> {ubicacion}</p>
+                                <p style="font-size: 14px; margin: 5px 0; color: #2e7d32; font-weight: bold;"><b>Alquiler:</b> ${alquiler}</p>
+                                <p style="font-size: 13px; margin: 8px 0; line-height: 1.5; color: #555; border-top: 1px solid #ddd; padding-top: 5px;"><b>Descripción:</b><br>{descripcion}</p>
+                            </div>
+                            """
+                            
+                            popup_html = f"""
+                            <div style="min-width: 280px; font-family: Arial, sans-serif; padding: 5px;">
+                                <h3 style="font-size: 18px; font-weight: bold; margin: 5px 0; color: #1f77b4;">#{idx} - {ciudad}</h3>
+                                <p style="font-size: 15px; margin: 8px 0; line-height: 1.4;"><b style="font-size: 15px;">Ubicación:</b><br>{ubicacion}</p>
+                                <p style="font-size: 16px; margin: 8px 0; color: #2e7d32; font-weight: bold;"><b>Alquiler:</b> ${alquiler}</p>
+                                <p style="font-size: 14px; margin: 8px 0; line-height: 1.5;"><b>m²:</b> {m2} | <b>Amb:</b> {ambientes} | <b>Baños:</b> {banos}</p>
+                                <p style="font-size: 14px; margin: 8px 0; line-height: 1.4;"><b>Descripción:</b><br>{descripcion}</p>
+                                {f'<p style="font-size: 14px; margin: 8px 0;"><b>Distancia:</b> {distancia}</p>' if distancia else ''}
+                                {f'<p style="font-size: 14px; margin: 8px 0;"><b>Puntaje:</b> {puntaje}</p>' if puntaje else ''}
+                            </div>
+                            """
+                            folium.Marker(
+                                location=[lat, lon],
+                                popup=folium.Popup(popup_html, max_width=350),
+                                tooltip=folium.Tooltip(tooltip_html, sticky=True),
+                                icon=folium.DivIcon(
+                                    html=f'<div style="background-color: #3388ff; color: white; border-radius: 50%; width: 35px; height: 35px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 16px; border: 3px solid white; box-shadow: 0 3px 6px rgba(0,0,0,0.4);">{idx}</div>',
+                                    icon_size=(35, 35),
+                                    icon_anchor=(17, 17)
+                                )
+                            ).add_to(m)
+                    except (ValueError, TypeError):
+                        continue
+            
+            # Mostrar mapa
+            map_data = st_folium(m, height=800, use_container_width=True, key="main_map", returned_objects=["last_clicked", "last_object_clicked"])
         
         # Detectar marcadores agregados por el Geocoder
         # El Geocoder agrega marcadores automáticamente, pero necesitamos detectarlos
@@ -875,11 +888,7 @@ elif mood == "Mapa":
                         st.success(f"✅ Punto agregado: {address}")
                         st.rerun()
         
-        # Mostrar mensaje si no hay puntos seleccionados
-        if not st.session_state["selected_points"]:
-            st.info("No hay puntos seleccionados. Busque un lugar o haga click en el mapa.")
-        
-        # Mostrar propiedades encontradas en columnas de 3 (sin numeración)
+        # Mostrar propiedades encontradas debajo del mapa (en columnas de 3)
         if st.session_state["found_properties"]:
             st.subheader("Propiedades encontradas:")
             props = st.session_state["found_properties"]
@@ -915,6 +924,10 @@ elif mood == "Mapa":
                                     st.link_button("Ver aviso", prop["url"], use_container_width=True)
                                 except Exception:
                                     st.write(f"[Ver aviso]({prop['url']})")
+        
+        # Mensaje de ayuda
+        if not st.session_state["selected_points"] and not st.session_state["found_properties"]:
+            st.info("💡 **Tip:** Selecciona puntos en el mapa haciendo click o busca lugares usando el campo de texto")
     except ImportError as e:
         st.error(f"Faltan dependencias necesarias: {e}")
         st.info("Instale las dependencias: 'folium', 'streamlit-folium' y 'geopy'.")
