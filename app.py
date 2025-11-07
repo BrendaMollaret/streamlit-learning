@@ -392,7 +392,7 @@ try:
                     min_banos = st.number_input("Mín. baños", min_value=1, value=1, step=1, key="min_banos_mapa")
                 with col2:
                     max_m2 = st.number_input("Máx. m²", min_value=10, value=10, step=10, key="max_m2_mapa")
-                    min_cocheras = st.number_input("Mín. cocheras", min_value=1, value=1, step=1, key="min_cocheras_mapa")
+                    min_cocheras = st.number_input("Mín. cocheras", min_value=0, value=0, step=1, key="min_cocheras_mapa")
                     min_alq = st.number_input("Alquiler mín.", min_value=0, value=0, step=1000, key="min_alq_mapa")
                     max_alq = st.number_input("Alquiler máx.", min_value=0, value=0, step=1000, key="max_alq_mapa")
                 
