@@ -462,7 +462,7 @@ with tab1:
                 )
 
                 sigma = st.slider(
-                    "¿Hasta qué distancia te gustaría que busquemos alrededor de tus puntos?",
+                    "¿Hasta qué distancia en km te gustaría que busquemos alrededor de tus puntos?",
                     min_value=1.0,
                     max_value=20.0,
                     value=4.0,
